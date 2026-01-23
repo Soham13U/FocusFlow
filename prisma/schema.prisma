@@ -1,0 +1,37 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+enum SessionType {
+  FOCUS
+  SHORT_BREAK
+  LONG_BREAK
+}
+
+model Label {
+  id        Int      @id @default(autoincrement())
+  name      String   @unique
+  createdAt DateTime @default(now())
+
+  sessions  Session[]
+}
+
+model Session {
+  id          Int         @id @default(autoincrement())
+  type        SessionType
+  labelId     Int?
+  label       Label?      @relation(fields: [labelId], references: [id], onDelete: SetNull)
+
+  startedAt   DateTime
+  endedAt     DateTime
+  durationSec Int
+
+  createdAt   DateTime    @default(now())
+
+  @@index([startedAt])
+  @@index([type, startedAt])
+}
