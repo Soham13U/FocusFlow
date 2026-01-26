@@ -1,6 +1,13 @@
-"use client"
+"use client";
 
-import { useEffect, useMemo, useReducer, useRef } from "react";
+import {
+  useEffect,
+  useMemo,
+  useReducer,
+  useRef,
+  useState,
+  useCallback,
+} from "react";
 import {
   createInitialState,
   reduceTimer,
@@ -10,62 +17,156 @@ import {
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+
+type Label = { id: number; name: string; createdAt: string };
 
 function formatMMSS(totalSec: number): string {
-    const m = Math.floor(totalSec/60);
-    const s = totalSec % 60;
+  const m = Math.floor(totalSec / 60);
+  const s = totalSec % 60;
 
-    return `${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}`;
+  return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
 }
 
-export default function Timer(){
-    const [state,dispatch] = useReducer(reduceTimer,undefined,createInitialState);
+export default function Timer() {
+  //Label
+  const [labels, setLabels] = useState<Label[]>([]);
+  const [labelsLoading, setLabelsLoading] = useState(true);
+  const [labelsError, setLabelsError] = useState<string | null>(null);
 
-    const intervalRef = useRef<number | null>(null);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [newLabelName, setNewLabelName] = useState("");
+  const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
 
-    useEffect(()=>{
-        //clear existing intervals
-        if(intervalRef.current != null){
-            window.clearInterval(intervalRef.current);
-            intervalRef.current = null;
+  const [state, dispatch] = useReducer(
+    reduceTimer,
+    undefined,
+    createInitialState,
+  );
 
-        } 
+  const intervalRef = useRef<number | null>(null);
 
-        if(state.status === "RUNNING" || state.status === "PAUSED")
-        {
-            intervalRef.current = window.setInterval(()=>{
-                dispatch({type: "TICK", nowMs: Date.now()});
-            },250);
-        }
-        return () =>{
-            if(intervalRef.current != null){
-            window.clearInterval(intervalRef.current);
-            intervalRef.current = null;
+ const loadLabels = useCallback(async () => {
+  try {
+    setLabelsLoading(true);
+    setLabelsError(null);
 
-        } 
-        };
+    const res = await fetch("/api/labels", { cache: "no-store" });
+    if (!res.ok) throw new Error(`GET /api/labels failed (${res.status})`);
 
-    },[state.status]);
+    const data = (await res.json()) as Label[];
+    setLabels(data);
+  } catch (e: any) {
+    setLabelsError(e?.message ?? "Failed to load labels");
+  } finally {
+    setLabelsLoading(false);
+  }
+}, []);
+
+useEffect(() => {
+  loadLabels();
+}, [loadLabels]);
+
+async function handleCreateLabel() {
+  const name = newLabelName.trim();
+  if (!name) return;
+
+  setCreating(true);
+  setCreateError(null);
+
+  try {
+    const res = await fetch("/api/labels", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name }),
+    });
+
+    if (res.status === 409) {
+      setCreateError("That label already exists.");
+      return;
+    }
+
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      setCreateError(body?.error ?? "Failed to create label");
+      return;
+    }
+
+    const created = (await res.json()) as Label;
+
+    // refresh list + select new label
+    await loadLabels();
+    dispatch({ type: "SET_LABEL", labelId: created.id });
+
+    // reset + close
+    setNewLabelName("");
+    setCreateOpen(false);
+  } catch (e: any) {
+    setCreateError(e?.message ?? "Failed to create label");
+  } finally {
+    setCreating(false);
+  }
+}
 
 
-    const presets = useMemo(()=> [25,45,60],[]);
-    const currentMinutes = Math.round(state.targetDurationSec/60);
 
-    const isIdle = state.status === "IDLE";
-    const isRunning = state.status === "RUNNING";
-    const isPaused = state.status === "PAUSED";
-    const isComplete = state.status === "COMPLETE";
+  useEffect(() => {
+    //clear existing intervals
+    if (intervalRef.current != null) {
+      window.clearInterval(intervalRef.current);
+      intervalRef.current = null;
+    }
 
-    return(
-        <Card className="p-6 max-w-md mx-auto space-y-6">
-            <div className="text-center">
-                <div className="text-sm opacity-70">{state.mode}</div>
-                <div className="text-6xl font-semibold tabular-nums">{formatMMSS(state.remainingSec)}</div>
-                {isComplete && (<div className="mt-2 text-sm font-medium">Session Complete</div>)}
-            </div>
-            
-            {/*Presets*/}
-             <div className="flex gap-2 justify-center flex-wrap">
+    if (state.status === "RUNNING" || state.status === "PAUSED") {
+      intervalRef.current = window.setInterval(() => {
+        dispatch({ type: "TICK", nowMs: Date.now() });
+      }, 250);
+    }
+    return () => {
+      if (intervalRef.current != null) {
+        window.clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
+    };
+  }, [state.status]);
+
+  const presets = useMemo(() => [25, 45, 60], []);
+  const currentMinutes = Math.round(state.targetDurationSec / 60);
+
+  const isIdle = state.status === "IDLE";
+  const isRunning = state.status === "RUNNING";
+  const isPaused = state.status === "PAUSED";
+  const isComplete = state.status === "COMPLETE";
+
+  return (
+    <Card className="p-6 max-w-md mx-auto space-y-6">
+      <div className="text-center">
+        <div className="text-sm opacity-70">{state.mode}</div>
+        <div className="text-6xl font-semibold tabular-nums">
+          {formatMMSS(state.remainingSec)}
+        </div>
+        {isComplete && (
+          <div className="mt-2 text-sm font-medium">Session Complete</div>
+        )}
+      </div>
+
+      {/*Presets*/}
+      <div className="flex gap-2 justify-center flex-wrap">
         {presets.map((m) => (
           <Button
             key={m}
@@ -97,21 +198,116 @@ export default function Timer(){
         <span className="text-sm opacity-70">minutes</span>
       </div>
 
+      {/* Labels*/}
+      <div className="space-y-2">
+        <div className="text-sm opacity-70">Label</div>
+
+        {labelsLoading ? (
+          <div className="text-sm opacity-70">Loading labels...</div>
+        ) : labelsError ? (
+          <div className="text-sm text-red-500">{labelsError}</div>
+        ) : (
+          <Select
+            value={
+              state.selectedLabelId == null
+                ? "none"
+                : String(state.selectedLabelId)
+            }
+            onValueChange={(v) => {
+              dispatch({
+                type: "SET_LABEL",
+                labelId: v === "none" ? null : Number(v),
+              });
+            }}
+            disabled={!(state.status === "IDLE" || state.status === "COMPLETE")}
+          >
+            <SelectTrigger className="w-full">
+              <SelectValue placeholder="No label" />
+            </SelectTrigger>
+
+            <SelectContent>
+              <SelectItem value="none">No label</SelectItem>
+              {labels.map((l) => (
+                <SelectItem key={l.id} value={String(l.id)}>
+                  {l.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
+      </div>
+
+      {/*Custom Label */}
+      <div className="flex items-center justify-between">
+ 
+
+  <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+    <DialogTrigger asChild>
+      <Button variant="outline" size="sm" disabled={creating}>
+        + New label
+      </Button>
+    </DialogTrigger>
+
+    <DialogContent>
+      <DialogHeader>
+        <DialogTitle>Create label</DialogTitle>
+      </DialogHeader>
+
+      <div className="space-y-3">
+        <Input
+          placeholder="e.g., Deep Work"
+          value={newLabelName}
+          onChange={(e) => setNewLabelName(e.target.value)}
+          disabled={creating}
+          autoFocus
+        />
+
+        {createError && (
+          <div className="text-sm text-red-500">{createError}</div>
+        )}
+
+        <div className="flex justify-end gap-2">
+          <Button
+            variant="outline"
+            onClick={() => setCreateOpen(false)}
+            disabled={creating}
+          >
+            Cancel
+          </Button>
+
+          <Button
+            onClick={handleCreateLabel}
+            disabled={creating || newLabelName.trim().length === 0}
+          >
+            {creating ? "Creating..." : "Create"}
+          </Button>
+        </div>
+      </div>
+    </DialogContent>
+  </Dialog>
+</div>
+
+
       {/* Controls */}
       <div className="flex gap-2 justify-center">
         {(isIdle || isComplete) && (
-            <Button onClick={()=> dispatch({ type: "START", nowMs: Date.now()})}>
-                Start
-            </Button>
+          <Button
+            onClick={() => dispatch({ type: "START", nowMs: Date.now() })}
+          >
+            Start
+          </Button>
         )}
         {isRunning && (
-            <Button variant="secondary" onClick={()=> dispatch({type: "PAUSE", nowMs: Date.now()})}>
-                Pause
-            </Button>
+          <Button
+            variant="secondary"
+            onClick={() => dispatch({ type: "PAUSE", nowMs: Date.now() })}
+          >
+            Pause
+          </Button>
         )}
 
-        <Button variant="outline" onClick={()=> dispatch({type: "RESET"})}>
-            Reset
+        <Button variant="outline" onClick={() => dispatch({ type: "RESET" })}>
+          Reset
         </Button>
       </div>
 
@@ -123,18 +319,14 @@ export default function Timer(){
             disabled={!(isIdle || isComplete)}
             onClick={() => dispatch({ type: "SET_MODE", mode })}
           >
-            {mode === "FOCUS" ? "Focus" : mode === "SHORT_BREAK" ? "Short" : "Long"}
+            {mode === "FOCUS"
+              ? "Focus"
+              : mode === "SHORT_BREAK"
+                ? "Short"
+                : "Long"}
           </Button>
         ))}
       </div>
-
-
-
-
-
-        </Card>
-
-        
-    );
+    </Card>
+  );
 }
-
