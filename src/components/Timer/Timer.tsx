@@ -1,4 +1,6 @@
 "use client";
+import { initSound, playEndSound } from "./sound";
+
 
 import {
   useEffect,
@@ -44,6 +46,7 @@ function formatMMSS(totalSec: number): string {
 
 export default function Timer() {
   //Label
+  
   const [labels, setLabels] = useState<Label[]>([]);
   const [labelsLoading, setLabelsLoading] = useState(true);
   const [labelsError, setLabelsError] = useState<string | null>(null);
@@ -58,6 +61,7 @@ export default function Timer() {
     undefined,
     createInitialState,
   );
+  const canEditMeta = state.status === "IDLE" || state.status === "COMPLETE";
 
   const intervalRef = useRef<number | null>(null);
 
@@ -82,8 +86,17 @@ useEffect(() => {
   loadLabels();
 }, [loadLabels]);
 
+useEffect(() => {
+  if (!canEditMeta && createOpen) {
+    setCreateOpen(false);
+  }
+}, [canEditMeta, createOpen]);
+
+
 async function handleCreateLabel() {
   const name = newLabelName.trim();
+  if (!canEditMeta) return;
+
   if (!name) return;
 
   setCreating(true);
@@ -153,6 +166,52 @@ async function handleCreateLabel() {
   const isPaused = state.status === "PAUSED";
   const isComplete = state.status === "COMPLETE";
 
+  //Sound
+  const loggedRunRef = useRef<string | null>(null);
+
+useEffect(() => {
+  if (state.mode !== "FOCUS") return;
+  if (state.status !== "COMPLETE") return;
+  if (!state.completionFired) return;
+  if (state.startedAtMs == null) return;
+
+  // Build a unique "run id" based on start timestamp + duration + label
+  const runKey = `${state.startedAtMs}:${state.targetDurationSec}:${state.selectedLabelId ?? "none"}`;
+
+  // Guard: don't run side effects more than once for same completion
+  if (loggedRunRef.current === runKey) return;
+  loggedRunRef.current = runKey;
+
+  // Side effects
+  playEndSound();
+
+  const startedAt = new Date(state.startedAtMs).toISOString();
+  const endedAt = new Date().toISOString();
+
+  void fetch("/api/sessions", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      type: "FOCUS",
+      startedAt,
+      endedAt,
+      durationSec: state.targetDurationSec,
+      labelId: state.selectedLabelId,
+    }),
+  }).then(async (res) => {
+    if (!res.ok) {
+      // If it failed, allow retry on next completion by clearing guard
+      loggedRunRef.current = null;
+      console.error("Failed to log session", res.status, await res.text());
+    }
+  }).catch((err) => {
+    loggedRunRef.current = null;
+    console.error("Failed to log session", err);
+  });
+}, [state.status, state.mode, state.completionFired, state.startedAtMs, state.targetDurationSec, state.selectedLabelId]);
+
+
+
   return (
     <Card className="p-6 max-w-md mx-auto space-y-6">
       <div className="text-center">
@@ -219,7 +278,7 @@ async function handleCreateLabel() {
                 labelId: v === "none" ? null : Number(v),
               });
             }}
-            disabled={!(state.status === "IDLE" || state.status === "COMPLETE")}
+            disabled={!canEditMeta}
           >
             <SelectTrigger className="w-full">
               <SelectValue placeholder="No label" />
@@ -243,7 +302,7 @@ async function handleCreateLabel() {
 
   <Dialog open={createOpen} onOpenChange={setCreateOpen}>
     <DialogTrigger asChild>
-      <Button variant="outline" size="sm" disabled={creating}>
+      <Button variant="outline" size="sm" disabled={!canEditMeta || creating}>
         + New label
       </Button>
     </DialogTrigger>
@@ -292,7 +351,7 @@ async function handleCreateLabel() {
       <div className="flex gap-2 justify-center">
         {(isIdle || isComplete) && (
           <Button
-            onClick={() => dispatch({ type: "START", nowMs: Date.now() })}
+            onClick={() => {initSound(); dispatch({ type: "START", nowMs: Date.now() }) }}
           >
             Start
           </Button>
