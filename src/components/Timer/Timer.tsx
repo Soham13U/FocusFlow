@@ -1,7 +1,6 @@
 "use client";
 import { initSound, playEndSound } from "./sound";
 
-
 import {
   useEffect,
   useMemo,
@@ -46,7 +45,7 @@ function formatMMSS(totalSec: number): string {
 
 export default function Timer() {
   //Label
-  
+
   const [labels, setLabels] = useState<Label[]>([]);
   const [labelsLoading, setLabelsLoading] = useState(true);
   const [labelsError, setLabelsError] = useState<string | null>(null);
@@ -65,78 +64,75 @@ export default function Timer() {
 
   const intervalRef = useRef<number | null>(null);
 
- const loadLabels = useCallback(async () => {
-  try {
-    setLabelsLoading(true);
-    setLabelsError(null);
+  const loadLabels = useCallback(async () => {
+    try {
+      setLabelsLoading(true);
+      setLabelsError(null);
 
-    const res = await fetch("/api/labels", { cache: "no-store" });
-    if (!res.ok) throw new Error(`GET /api/labels failed (${res.status})`);
+      const res = await fetch("/api/labels", { cache: "no-store" });
+      if (!res.ok) throw new Error(`GET /api/labels failed (${res.status})`);
 
-    const data = (await res.json()) as Label[];
-    setLabels(data);
-  } catch (e: any) {
-    setLabelsError(e?.message ?? "Failed to load labels");
-  } finally {
-    setLabelsLoading(false);
-  }
-}, []);
-
-useEffect(() => {
-  loadLabels();
-}, [loadLabels]);
-
-useEffect(() => {
-  if (!canEditMeta && createOpen) {
-    setCreateOpen(false);
-  }
-}, [canEditMeta, createOpen]);
-
-
-async function handleCreateLabel() {
-  const name = newLabelName.trim();
-  if (!canEditMeta) return;
-
-  if (!name) return;
-
-  setCreating(true);
-  setCreateError(null);
-
-  try {
-    const res = await fetch("/api/labels", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name }),
-    });
-
-    if (res.status === 409) {
-      setCreateError("That label already exists.");
-      return;
+      const data = (await res.json()) as Label[];
+      setLabels(data);
+    } catch (e: any) {
+      setLabelsError(e?.message ?? "Failed to load labels");
+    } finally {
+      setLabelsLoading(false);
     }
+  }, []);
 
-    if (!res.ok) {
-      const body = await res.json().catch(() => null);
-      setCreateError(body?.error ?? "Failed to create label");
-      return;
+  useEffect(() => {
+    loadLabels();
+  }, [loadLabels]);
+
+  useEffect(() => {
+    if (!canEditMeta && createOpen) {
+      setCreateOpen(false);
     }
+  }, [canEditMeta, createOpen]);
 
-    const created = (await res.json()) as Label;
+  async function handleCreateLabel() {
+    const name = newLabelName.trim();
+    if (!canEditMeta) return;
 
-    // refresh list + select new label
-    await loadLabels();
-    dispatch({ type: "SET_LABEL", labelId: created.id });
+    if (!name) return;
 
-    // reset + close
-    setNewLabelName("");
-    setCreateOpen(false);
-  } catch (e: any) {
-    setCreateError(e?.message ?? "Failed to create label");
-  } finally {
-    setCreating(false);
+    setCreating(true);
+    setCreateError(null);
+
+    try {
+      const res = await fetch("/api/labels", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name }),
+      });
+
+      if (res.status === 409) {
+        setCreateError("That label already exists.");
+        return;
+      }
+
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        setCreateError(body?.error ?? "Failed to create label");
+        return;
+      }
+
+      const created = (await res.json()) as Label;
+
+      // refresh list + select new label
+      await loadLabels();
+      dispatch({ type: "SET_LABEL", labelId: created.id });
+
+      // reset + close
+      setNewLabelName("");
+      setCreateOpen(false);
+    } catch (e: any) {
+      setCreateError(e?.message ?? "Failed to create label");
+    } finally {
+      setCreating(false);
+    }
   }
-}
-
-
 
   useEffect(() => {
     //clear existing intervals
@@ -169,48 +165,107 @@ async function handleCreateLabel() {
   //Sound
   const loggedRunRef = useRef<string | null>(null);
 
-useEffect(() => {
-  if (state.mode !== "FOCUS") return;
-  if (state.status !== "COMPLETE") return;
-  if (!state.completionFired) return;
-  if (state.startedAtMs == null) return;
+  useEffect(() => {
+    if (state.mode !== "FOCUS") return;
+    if (state.status !== "COMPLETE") return;
+    if (!state.completionFired) return;
+    if (state.startedAtMs == null) return;
 
-  // Build a unique "run id" based on start timestamp + duration + label
-  const runKey = `${state.startedAtMs}:${state.targetDurationSec}:${state.selectedLabelId ?? "none"}`;
+    // Build a unique "run id" based on start timestamp + duration + label
+    const runKey = `${state.startedAtMs}:${state.targetDurationSec}:${state.selectedLabelId ?? "none"}`;
 
-  // Guard: don't run side effects more than once for same completion
-  if (loggedRunRef.current === runKey) return;
-  loggedRunRef.current = runKey;
+    // Guard: don't run side effects more than once for same completion
+    if (loggedRunRef.current === runKey) return;
+    loggedRunRef.current = runKey;
 
-  // Side effects
-  playEndSound();
+    // Side effects
+    playEndSound();
 
-  const startedAt = new Date(state.startedAtMs).toISOString();
-  const endedAt = new Date().toISOString();
+    const startedAt = new Date(state.startedAtMs).toISOString();
+    const endedAt = new Date().toISOString();
 
-  void fetch("/api/sessions", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      type: "FOCUS",
-      startedAt,
-      endedAt,
-      durationSec: state.targetDurationSec,
-      labelId: state.selectedLabelId,
-    }),
-  }).then(async (res) => {
-    if (!res.ok) {
-      // If it failed, allow retry on next completion by clearing guard
+    void fetch("/api/sessions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        type: "FOCUS",
+        startedAt,
+        endedAt,
+        durationSec: state.targetDurationSec,
+        labelId: state.selectedLabelId,
+      }),
+    })
+      .then(async (res) => {
+        if (!res.ok) {
+          // If it failed, allow retry on next completion by clearing guard
+          loggedRunRef.current = null;
+          console.error("Failed to log session", res.status, await res.text());
+        }
+      })
+      .catch((err) => {
+        loggedRunRef.current = null;
+        console.error("Failed to log session", err);
+      });
+  }, [
+    state.status,
+    state.mode,
+    state.completionFired,
+    state.startedAtMs,
+    state.targetDurationSec,
+    state.selectedLabelId,
+  ]);
+
+  //Save Partial
+  async function handleSavePartial() {
+    if (!isPaused) return;
+    if (state.mode !== "FOCUS") return;
+    if (state.startedAtMs == null) return;
+
+    const elapsedSec = Math.max(
+      0,
+      state.targetDurationSec - state.remainingSec,
+    );
+    if (elapsedSec < 1) return; // don't log 0-sec sessions
+
+    const runKey = `${state.startedAtMs}:${state.targetDurationSec}:${state.selectedLabelId ?? "none"}`;
+
+    // prevent double-click duplicates
+    if (loggedRunRef.current === runKey) return;
+    loggedRunRef.current = runKey;
+
+    const startedAt = new Date(state.startedAtMs).toISOString();
+    const endedAt = new Date().toISOString();
+
+    try {
+      const res = await fetch("/api/sessions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          type: "FOCUS",
+          startedAt,
+          endedAt,
+          durationSec: elapsedSec,
+          labelId: state.selectedLabelId,
+        }),
+      });
+
+      if (!res.ok) {
+        loggedRunRef.current = null;
+        console.error(
+          "Failed to save partial session",
+          res.status,
+          await res.text(),
+        );
+        return;
+      }
+
+      // End this run cleanly (prevents resume + prevents later double logging)
+      dispatch({ type: "RESET" });
+    } catch (err) {
       loggedRunRef.current = null;
-      console.error("Failed to log session", res.status, await res.text());
+      console.error("Failed to save partial session", err);
     }
-  }).catch((err) => {
-    loggedRunRef.current = null;
-    console.error("Failed to log session", err);
-  });
-}, [state.status, state.mode, state.completionFired, state.startedAtMs, state.targetDurationSec, state.selectedLabelId]);
-
-
+  }
 
   return (
     <Card className="p-6 max-w-md mx-auto space-y-6">
@@ -298,60 +353,64 @@ useEffect(() => {
 
       {/*Custom Label */}
       <div className="flex items-center justify-between">
- 
+        <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+          <DialogTrigger asChild>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={!canEditMeta || creating}
+            >
+              + New label
+            </Button>
+          </DialogTrigger>
 
-  <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-    <DialogTrigger asChild>
-      <Button variant="outline" size="sm" disabled={!canEditMeta || creating}>
-        + New label
-      </Button>
-    </DialogTrigger>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Create label</DialogTitle>
+            </DialogHeader>
 
-    <DialogContent>
-      <DialogHeader>
-        <DialogTitle>Create label</DialogTitle>
-      </DialogHeader>
+            <div className="space-y-3">
+              <Input
+                placeholder="e.g., Deep Work"
+                value={newLabelName}
+                onChange={(e) => setNewLabelName(e.target.value)}
+                disabled={creating}
+                autoFocus
+              />
 
-      <div className="space-y-3">
-        <Input
-          placeholder="e.g., Deep Work"
-          value={newLabelName}
-          onChange={(e) => setNewLabelName(e.target.value)}
-          disabled={creating}
-          autoFocus
-        />
+              {createError && (
+                <div className="text-sm text-red-500">{createError}</div>
+              )}
 
-        {createError && (
-          <div className="text-sm text-red-500">{createError}</div>
-        )}
+              <div className="flex justify-end gap-2">
+                <Button
+                  variant="outline"
+                  onClick={() => setCreateOpen(false)}
+                  disabled={creating}
+                >
+                  Cancel
+                </Button>
 
-        <div className="flex justify-end gap-2">
-          <Button
-            variant="outline"
-            onClick={() => setCreateOpen(false)}
-            disabled={creating}
-          >
-            Cancel
-          </Button>
-
-          <Button
-            onClick={handleCreateLabel}
-            disabled={creating || newLabelName.trim().length === 0}
-          >
-            {creating ? "Creating..." : "Create"}
-          </Button>
-        </div>
+                <Button
+                  onClick={handleCreateLabel}
+                  disabled={creating || newLabelName.trim().length === 0}
+                >
+                  {creating ? "Creating..." : "Create"}
+                </Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
       </div>
-    </DialogContent>
-  </Dialog>
-</div>
-
 
       {/* Controls */}
       <div className="flex gap-2 justify-center">
         {(isIdle || isComplete) && (
           <Button
-            onClick={() => {initSound(); dispatch({ type: "START", nowMs: Date.now() }) }}
+            onClick={() => {
+              initSound();
+              dispatch({ type: "START", nowMs: Date.now() });
+            }}
           >
             Start
           </Button>
@@ -363,6 +422,17 @@ useEffect(() => {
           >
             Pause
           </Button>
+        )}
+        {isPaused && (
+          <Button
+            variant="secondary"
+            onClick={() => dispatch({ type: "RESUME", nowMs: Date.now() })}
+          >
+            Resume
+          </Button>
+        )}
+        {isPaused && state.mode === "FOCUS" && (
+          <Button onClick={handleSavePartial}>Save session</Button>
         )}
 
         <Button variant="outline" onClick={() => dispatch({ type: "RESET" })}>
