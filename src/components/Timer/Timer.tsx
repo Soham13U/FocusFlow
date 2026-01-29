@@ -11,6 +11,7 @@ import {
 } from "react";
 import {
   createInitialState,
+  deriveRemainingSec,
   reduceTimer,
   type TimerState,
   type Mode,
@@ -33,6 +34,53 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+
+//Helper
+const LS_KEYS = {
+  focusMin: "ff:lastFocusMinutes",
+  labelId: "ff:lastLabelId",
+  timerSnapshot: "ff:timerSnapshot",
+};
+function writeJSON(key: string, value: unknown) {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch {}
+}
+
+function readJSON<T>(key: string): T | null {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return null;
+    return JSON.parse(raw) as T;
+  } catch {
+    return null;
+  }
+}
+
+function readNumber(key: string): number | null {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return null;
+    const n = Number(raw);
+    return Number.isFinite(n) ? n : null;
+  } catch {
+    return null;
+  }
+}
+
+function readString(key: string): string | null {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function writeString(key: string, value: string) {
+  try {
+    localStorage.setItem(key, value);
+  } catch {}
+}
 
 type Label = { id: number; name: string; createdAt: string };
 
@@ -266,6 +314,97 @@ export default function Timer() {
       console.error("Failed to save partial session", err);
     }
   }
+
+  //Persist
+  useEffect(() => {
+    const snap = readJSON<any>(LS_KEYS.timerSnapshot);
+
+    if (snap && (snap.status === "RUNNING" || snap.status === "PAUSED")) {
+      const hydrated = {
+        ...createInitialState(),
+        mode: snap.mode,
+        status: snap.status,
+        focusDurationSec: snap.focusDurationSec,
+        targetDurationSec: snap.targetDurationSec,
+        remainingSec: 0, // we’ll recompute
+        selectedLabelId: snap.selectedLabelId ?? null,
+        startedAtMs: snap.startedAtMs,
+        pausedAtMs: snap.pausedAtMs ?? null,
+        accumPausedMs: snap.accumPausedMs ?? 0,
+        completionFired: false,
+      } as const;
+
+      // recompute remaining now
+      const now = Date.now();
+      const remaining = deriveRemainingSec(hydrated, now);
+
+      const finalState = {
+        ...hydrated,
+        remainingSec: remaining,
+        status: remaining === 0 ? "COMPLETE" : hydrated.status,
+      };
+
+      dispatch({ type: "HYDRATE", state: finalState as any });
+      return;
+    }
+    dispatch({ type: "SET_MODE", mode: "FOCUS" });
+
+    const savedMin = readNumber(LS_KEYS.focusMin);
+    if (savedMin && savedMin >= 1 && savedMin <= 360) {
+      dispatch({ type: "SET_DURATION_SEC", seconds: savedMin * 60 });
+    }
+
+    const savedLabel = readString(LS_KEYS.labelId);
+    if (savedLabel) {
+      const id = Number(savedLabel);
+      if (Number.isFinite(id)) dispatch({ type: "SET_LABEL", labelId: id });
+    }
+    // run once
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    writeString(
+      LS_KEYS.focusMin,
+      String(Math.round(state.focusDurationSec / 60)),
+    );
+  }, [state.focusDurationSec]);
+
+  useEffect(() => {
+    writeString(
+      LS_KEYS.labelId,
+      state.selectedLabelId == null ? "" : String(state.selectedLabelId),
+    );
+  }, [state.selectedLabelId]);
+  useEffect(() => {
+    if (!(state.status === "RUNNING" || state.status === "PAUSED")) {
+      // clear snapshot when not active
+      try {
+        localStorage.removeItem(LS_KEYS.timerSnapshot);
+      } catch {}
+      return;
+    }
+
+    writeJSON(LS_KEYS.timerSnapshot, {
+      mode: state.mode,
+      status: state.status,
+      focusDurationSec: state.focusDurationSec,
+      targetDurationSec: state.targetDurationSec,
+      selectedLabelId: state.selectedLabelId,
+      startedAtMs: state.startedAtMs,
+      pausedAtMs: state.pausedAtMs,
+      accumPausedMs: state.accumPausedMs,
+    });
+  }, [
+    state.status,
+    state.mode,
+    state.focusDurationSec,
+    state.targetDurationSec,
+    state.selectedLabelId,
+    state.startedAtMs,
+    state.pausedAtMs,
+    state.accumPausedMs,
+  ]);
 
   return (
     <Card className="p-6 max-w-md mx-auto space-y-6">
